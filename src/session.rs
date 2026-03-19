@@ -251,6 +251,7 @@ impl CanarySession {
                 "Prompt tokens are empty".into(),
             ));
         }
+        log::debug!("canary prompt ids: {:?}", prompt_tokens);
 
         // Prepare encoder tensors once
         let encoded_shape = encoded.shape();
@@ -580,6 +581,9 @@ impl CanarySession {
                 };
 
                 if next_token == eos_id {
+                    if generated.is_empty() {
+                        log::debug!("canary greedy decode ended immediately with EOS");
+                    }
                     break;
                 }
 
@@ -766,6 +770,9 @@ impl CanarySession {
         }
 
         if let Some(best) = beams.first() {
+            if best.tokens.is_empty() {
+                log::debug!("canary beam search produced empty output");
+            }
             generated = best
                 .tokens
                 .iter()
