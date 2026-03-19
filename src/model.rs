@@ -220,7 +220,10 @@ impl Canary {
             },
             _ => config.clone(),
         };
-        let decoder = Arc::new(Mutex::new(Self::create_session(&decoder_path, &decoder_config)?));
+        let decoder = Arc::new(Mutex::new(Self::create_session(
+            &decoder_path,
+            &decoder_config,
+        )?));
 
         Ok(Self {
             encoder,
@@ -244,12 +247,7 @@ impl Canary {
         target_lang: impl Into<String>,
         config: StreamConfig,
     ) -> Result<CanaryStream> {
-        CanaryStream::new(
-            self.clone(),
-            source_lang.into(),
-            target_lang.into(),
-            config,
-        )
+        CanaryStream::new(self.clone(), source_lang.into(), target_lang.into(), config)
     }
 
     /// Transcribe an audio file using a fresh session.
@@ -338,43 +336,53 @@ impl Canary {
             };
 
             builder = builder
-                .with_optimization_level(opt_level)?
-                .with_memory_pattern(false)?;
+                .with_optimization_level(opt_level)
+                .map_err(|e| CanaryError::ModelError(e.to_string()))?
+                .with_memory_pattern(false)
+                .map_err(|e| CanaryError::ModelError(e.to_string()))?;
 
             if !config.skip_ort_threads {
                 builder = builder
-                    .with_intra_threads(config.intra_threads)?
-                    .with_inter_threads(config.inter_threads)?;
+                    .with_intra_threads(config.intra_threads)
+                    .map_err(|e| CanaryError::ModelError(e.to_string()))?
+                    .with_inter_threads(config.inter_threads)
+                    .map_err(|e| CanaryError::ModelError(e.to_string()))?;
             }
 
             if config.disable_ort_prepack {
-                builder = builder.with_prepacking(false)?;
+                builder = builder
+                    .with_prepacking(false)
+                    .map_err(|e| CanaryError::ModelError(e.to_string()))?;
             }
         }
 
         if config.ort_verbose {
-            builder = builder.with_logger(Arc::new(
-                |level: LogLevel, category: &str, id: &str, location: &str, message: &str| {
-                    let log_level = match level {
-                        LogLevel::Verbose => log::Level::Debug,
-                        LogLevel::Info => log::Level::Info,
-                        LogLevel::Warning => log::Level::Warn,
-                        LogLevel::Error | LogLevel::Fatal => log::Level::Error,
-                    };
-                    log::log!(
-                        log_level,
-                        "[ort::{:?}] {} {} {}: {}",
-                        level,
-                        category,
-                        id,
-                        location,
-                        message
-                    );
-                },
-            ))?;
             builder = builder
-                .with_log_level(LogLevel::Verbose)?
-                .with_log_verbosity(4)?;
+                .with_logger(Arc::new(
+                    |level: LogLevel, category: &str, id: &str, location: &str, message: &str| {
+                        let log_level = match level {
+                            LogLevel::Verbose => log::Level::Debug,
+                            LogLevel::Info => log::Level::Info,
+                            LogLevel::Warning => log::Level::Warn,
+                            LogLevel::Error | LogLevel::Fatal => log::Level::Error,
+                        };
+                        log::log!(
+                            log_level,
+                            "[ort::{:?}] {} {} {}: {}",
+                            level,
+                            category,
+                            id,
+                            location,
+                            message
+                        );
+                    },
+                ))
+                .map_err(|e| CanaryError::ModelError(e.to_string()))?;
+            builder = builder
+                .with_log_level(LogLevel::Verbose)
+                .map_err(|e| CanaryError::ModelError(e.to_string()))?
+                .with_log_verbosity(4)
+                .map_err(|e| CanaryError::ModelError(e.to_string()))?;
         }
 
         builder = execution::apply_execution_providers(builder, config)?;
@@ -415,7 +423,9 @@ impl Canary {
             .ok_or_else(|| CanaryError::ModelError("Invalid external data file name".into()))?;
         let data = std::fs::read(&data_path)?;
 
-        builder = builder.with_external_initializer_file_in_memory(file_name, data.into())?;
+        builder = builder
+            .with_external_initializer_file_in_memory(file_name, data.into())
+            .map_err(|e| CanaryError::ModelError(e.to_string()))?;
         Ok(builder)
     }
 }

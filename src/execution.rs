@@ -8,7 +8,9 @@ pub fn apply_execution_providers(
     config: &ExecutionConfig,
 ) -> Result<SessionBuilder> {
     let providers = execution_providers(config)?;
-    builder = builder.with_execution_providers(providers)?;
+    builder = builder
+        .with_execution_providers(providers)
+        .map_err(|e| CanaryError::OrtError(e.into()))?;
     Ok(builder)
 }
 

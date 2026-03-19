@@ -13,7 +13,7 @@ name = "canary_rs"
 path = "src/lib.rs"
 
 [dependencies]
-ort = { version = "2.0.0-rc.11" }
+ort = { version = "2.0.0-rc.12" }
 hound = "3.5"
 ndarray = "0.17.2"
 thiserror = "2.0"
