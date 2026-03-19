@@ -57,6 +57,8 @@ pub struct SessionConfig {
     pub suppress_token_ids: Option<Vec<usize>>,
     /// Optional emotion token override (Canary2), e.g. "<|emo:neutral|>".
     pub emotion_token: Option<String>,
+    /// Optional decoder context prefix (Canary2).
+    pub decoder_context: Option<String>,
     /// Enable sampling instead of greedy/beam.
     pub sample: bool,
     /// Sampling temperature (1.0 = no scaling).
@@ -86,6 +88,7 @@ impl Default for SessionConfig {
             suppress_tokens_below: f32::NEG_INFINITY,
             suppress_token_ids: None,
             emotion_token: None,
+            decoder_context: None,
             sample: false,
             temperature: 1.0,
             top_k: 0,
@@ -137,6 +140,11 @@ impl SessionConfig {
 
     pub fn with_emotion_token(mut self, token: impl Into<String>) -> Self {
         self.emotion_token = Some(token.into());
+        self
+    }
+
+    pub fn with_decoder_context(mut self, context: impl Into<String>) -> Self {
+        self.decoder_context = Some(context.into());
         self
     }
 

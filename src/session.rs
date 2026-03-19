@@ -843,8 +843,15 @@ impl CanarySession {
             });
         }
 
+        let final_text = text.trim().to_string();
+        if final_text.is_empty() {
+            let ids: Vec<usize> = token_results.iter().map(|(id, _)| *id).collect();
+            log::debug!("canary decode produced empty text");
+            log::debug!("canary decode token ids: {:?}", ids);
+        }
+
         Ok(CanaryResult {
-            text: text.trim().to_string(),
+            text: final_text,
             tokens: result_tokens,
         })
     }
@@ -863,6 +870,31 @@ pub(crate) fn build_default_prompt_tokens(
     if has_startofcontext {
         if let Some(&id) = token_to_id.get("<|startofcontext|>") {
             tokens.push(id);
+        }
+        if let Some(ctx) = session_cfg
+            .decoder_context
+            .as_deref()
+            .filter(|c| !c.trim().is_empty())
+        {
+            for raw in ctx.split(|c| c == ',' || c == ' ' || c == '\n' || c == '\t') {
+                let token = raw.trim();
+                if token.is_empty() {
+                    continue;
+                }
+                if token.chars().all(|c| c.is_ascii_digit()) {
+                    if let Ok(id) = token.parse::<usize>() {
+                        if id < token_to_id.len() {
+                            tokens.push(id);
+                        } else {
+                            log::warn!("Decoder context id {} out of range", id);
+                        }
+                    }
+                } else if let Some(&id) = token_to_id.get(token) {
+                    tokens.push(id);
+                } else {
+                    log::warn!("Decoder context token '{}' not found in vocabulary", token);
+                }
+            }
         }
         tokens.push(bos_id);
 
