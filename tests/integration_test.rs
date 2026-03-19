@@ -1,21 +1,41 @@
 use canary_rs::{Canary, ExecutionConfig, Result, SessionConfig};
+use std::path::Path;
+
+fn require_path(key: &str, default: &str) -> Option<String> {
+    let value = std::env::var(key).unwrap_or_else(|_| default.to_string());
+    if Path::new(&value).exists() {
+        Some(value)
+    } else {
+        None
+    }
+}
 
 #[test]
-#[ignore]
 fn test_transcribe_loading_audio() -> Result<()> {
-    let model_path = "canary-1b-v2";
+    let model_path = match require_path("CANARY_TEST_MODEL_DIR", "canary-1b-v2") {
+        Some(p) => p,
+        None => {
+            eprintln!("Skipping: missing CANARY_TEST_MODEL_DIR");
+            return Ok(());
+        }
+    };
+
+    let audio_path = match require_path("CANARY_TEST_AUDIO", "audio.wav") {
+        Some(p) => p,
+        None => {
+            eprintln!("Skipping: missing CANARY_TEST_AUDIO");
+            return Ok(());
+        }
+    };
+
     let model = Canary::from_pretrained(model_path, None)?;
     let mut session = model.session();
 
-    // Test with the loading.raw file
-    let audio_path = "audio.wav";
     let result = session.transcribe_file(audio_path, "en", "en")?;
 
     println!("Transcription result: {}", result.text);
     println!("Tokens: {:#?}", result.tokens);
 
-    // The audio should say something like "Multitask loaded successfully"
-    // We'll just check it's not empty for now
     assert!(!result.text.is_empty(), "Transcription should not be empty");
 
     Ok(())
@@ -78,27 +98,52 @@ fn test_execution_config_uses_session_config() {
 }
 
 #[test]
-#[ignore]
 fn test_vocab_has_canary2_tokens_1b() {
-    let vocab = std::fs::read_to_string("canary-1b-v2/vocab.txt")
-        .expect("missing vocab.txt for canary-1b-v2");
+    let model_dir = match require_path("CANARY_TEST_MODEL_DIR", "canary-1b-v2") {
+        Some(p) => p,
+        None => {
+            eprintln!("Skipping: missing CANARY_TEST_MODEL_DIR");
+            return;
+        }
+    };
+    let vocab_path = format!("{}/vocab.txt", model_dir);
+    if !Path::new(&vocab_path).exists() {
+        eprintln!("Skipping: missing vocab.txt at {}", vocab_path);
+        return;
+    }
+    let vocab = std::fs::read_to_string(vocab_path).expect("missing vocab.txt");
     assert!(vocab.contains("<|startofcontext|>"));
     assert!(vocab.contains("<|emo:undefined|>"));
 }
 
 #[test]
-#[ignore]
 fn test_vocab_has_canary2_tokens_180m() {
-    let vocab = std::fs::read_to_string("canary-180m-flash/vocab.txt")
-        .expect("missing vocab.txt for canary-180m-flash");
+    let model_dir = match require_path("CANARY_TEST_MODEL_DIR_180M", "canary-180m-flash") {
+        Some(p) => p,
+        None => {
+            eprintln!("Skipping: missing CANARY_TEST_MODEL_DIR_180M");
+            return;
+        }
+    };
+    let vocab_path = format!("{}/vocab.txt", model_dir);
+    if !Path::new(&vocab_path).exists() {
+        eprintln!("Skipping: missing vocab.txt at {}", vocab_path);
+        return;
+    }
+    let vocab = std::fs::read_to_string(vocab_path).expect("missing vocab.txt");
     assert!(vocab.contains("<|startofcontext|>"));
     assert!(vocab.contains("<|emo:undefined|>"));
 }
 
 #[test]
-#[ignore]
 fn test_model_loads() -> Result<()> {
-    let model_path = "canary-1b-v2";
+    let model_path = match require_path("CANARY_TEST_MODEL_DIR", "canary-1b-v2") {
+        Some(p) => p,
+        None => {
+            eprintln!("Skipping: missing CANARY_TEST_MODEL_DIR");
+            return Ok(());
+        }
+    };
     let _model = Canary::from_pretrained(model_path, None)?;
     println!("Model loaded successfully!");
     Ok(())
