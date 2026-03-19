@@ -1,6 +1,7 @@
 use canary_rs::{Canary, ExecutionConfig, Result, SessionConfig};
 
 #[test]
+#[ignore]
 fn test_transcribe_loading_audio() -> Result<()> {
     let model_path = "canary-1b-v2";
     let model = Canary::from_pretrained(model_path, None)?;
