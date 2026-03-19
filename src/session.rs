@@ -228,103 +228,13 @@ impl CanarySession {
                 Some(spec)
             }
         });
-        let default_prompt_tokens = {
-            let mut tokens = Vec::new();
-            let has_startofcontext = self.model.token_to_id.contains_key("<|startofcontext|>");
-
-            if has_startofcontext {
-                if let Some(&id) = self.model.token_to_id.get("<|startofcontext|>") {
-                    tokens.push(id);
-                }
-                tokens.push(bos_id);
-
-                if let Some(token) = session_cfg
-                    .emotion_token
-                    .as_deref()
-                    .filter(|t| !t.trim().is_empty())
-                {
-                    if let Some(&id) = self.model.token_to_id.get(token) {
-                        tokens.push(id);
-                    } else {
-                        log::warn!("Emotion token '{}' not found in vocabulary", token);
-                    }
-                } else if let Some(&id) = self.model.token_to_id.get("<|emo:undefined|>") {
-                    tokens.push(id);
-                }
-
-                if let Some(&id) = self.model.token_to_id.get(&source_lang_token) {
-                    tokens.push(id);
-                } else {
-                    log::warn!(
-                        "Source language token '{}' not found in vocabulary",
-                        source_lang_token
-                    );
-                }
-
-                if let Some(&id) = self.model.token_to_id.get(&target_lang_token) {
-                    tokens.push(id);
-                } else {
-                    log::warn!(
-                        "Target language token '{}' not found in vocabulary",
-                        target_lang_token
-                    );
-                }
-            } else {
-                tokens.push(bos_id);
-
-                if let Some(&id) = self.model.token_to_id.get(&source_lang_token) {
-                    tokens.push(id);
-                } else {
-                    log::warn!(
-                        "Source language token '{}' not found in vocabulary",
-                        source_lang_token
-                    );
-                }
-
-                if let Some(&id) = self.model.token_to_id.get(&target_lang_token) {
-                    tokens.push(id);
-                } else {
-                    log::warn!(
-                        "Target language token '{}' not found in vocabulary",
-                        target_lang_token
-                    );
-                }
-            }
-
-            let use_pnc = session_cfg.use_pnc;
-            let pnc_token = if use_pnc { "<|pnc|>" } else { "<|nopnc|>" };
-            if let Some(&id) = self.model.token_to_id.get(pnc_token) {
-                tokens.push(id);
-            }
-
-            let use_itn = session_cfg.use_itn;
-            let itn_token = if use_itn { "<|itn|>" } else { "<|noitn|>" };
-            if let Some(&id) = self.model.token_to_id.get(itn_token) {
-                tokens.push(id);
-            }
-
-            let use_ts = session_cfg.use_timestamps;
-            let ts_token = if use_ts {
-                "<|timestamp|>"
-            } else {
-                "<|notimestamp|>"
-            };
-            if let Some(&id) = self.model.token_to_id.get(ts_token) {
-                tokens.push(id);
-            }
-
-            let use_diarize = session_cfg.use_diarize;
-            let diarize_token = if use_diarize {
-                "<|diarize|>"
-            } else {
-                "<|nodiarize|>"
-            };
-            if let Some(&id) = self.model.token_to_id.get(diarize_token) {
-                tokens.push(id);
-            }
-
-            tokens
-        };
+        let default_prompt_tokens = build_default_prompt_tokens(
+            self.model.token_to_id.as_ref(),
+            bos_id,
+            &source_lang_token,
+            &target_lang_token,
+            session_cfg,
+        );
         let prompt_tokens = if let Some(spec) = prompt_override {
             let tokens = parse_prompt_override(self.model.token_to_id.as_ref(), vocab_len, spec);
             if tokens.is_empty() {
@@ -930,5 +840,172 @@ impl CanarySession {
             text: text.trim().to_string(),
             tokens: result_tokens,
         })
+    }
+}
+
+pub(crate) fn build_default_prompt_tokens(
+    token_to_id: &HashMap<String, usize>,
+    bos_id: usize,
+    source_lang_token: &str,
+    target_lang_token: &str,
+    session_cfg: &crate::model::SessionConfig,
+) -> Vec<usize> {
+    let mut tokens = Vec::new();
+    let has_startofcontext = token_to_id.contains_key("<|startofcontext|>");
+
+    if has_startofcontext {
+        if let Some(&id) = token_to_id.get("<|startofcontext|>") {
+            tokens.push(id);
+        }
+        tokens.push(bos_id);
+
+        if let Some(token) = session_cfg
+            .emotion_token
+            .as_deref()
+            .filter(|t| !t.trim().is_empty())
+        {
+            if let Some(&id) = token_to_id.get(token) {
+                tokens.push(id);
+            } else {
+                log::warn!("Emotion token '{}' not found in vocabulary", token);
+            }
+        } else if let Some(&id) = token_to_id.get("<|emo:undefined|>") {
+            tokens.push(id);
+        }
+
+        if let Some(&id) = token_to_id.get(source_lang_token) {
+            tokens.push(id);
+        } else {
+            log::warn!(
+                "Source language token '{}' not found in vocabulary",
+                source_lang_token
+            );
+        }
+
+        if let Some(&id) = token_to_id.get(target_lang_token) {
+            tokens.push(id);
+        } else {
+            log::warn!(
+                "Target language token '{}' not found in vocabulary",
+                target_lang_token
+            );
+        }
+    } else {
+        tokens.push(bos_id);
+
+        if let Some(&id) = token_to_id.get(source_lang_token) {
+            tokens.push(id);
+        } else {
+            log::warn!(
+                "Source language token '{}' not found in vocabulary",
+                source_lang_token
+            );
+        }
+
+        if let Some(&id) = token_to_id.get(target_lang_token) {
+            tokens.push(id);
+        } else {
+            log::warn!(
+                "Target language token '{}' not found in vocabulary",
+                target_lang_token
+            );
+        }
+    }
+
+    let use_pnc = session_cfg.use_pnc;
+    let pnc_token = if use_pnc { "<|pnc|>" } else { "<|nopnc|>" };
+    if let Some(&id) = token_to_id.get(pnc_token) {
+        tokens.push(id);
+    }
+
+    let use_itn = session_cfg.use_itn;
+    let itn_token = if use_itn { "<|itn|>" } else { "<|noitn|>" };
+    if let Some(&id) = token_to_id.get(itn_token) {
+        tokens.push(id);
+    }
+
+    let use_ts = session_cfg.use_timestamps;
+    let ts_token = if use_ts {
+        "<|timestamp|>"
+    } else {
+        "<|notimestamp|>"
+    };
+    if let Some(&id) = token_to_id.get(ts_token) {
+        tokens.push(id);
+    }
+
+    let use_diarize = session_cfg.use_diarize;
+    let diarize_token = if use_diarize {
+        "<|diarize|>"
+    } else {
+        "<|nodiarize|>"
+    };
+    if let Some(&id) = token_to_id.get(diarize_token) {
+        tokens.push(id);
+    }
+
+    tokens
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_default_prompt_tokens;
+    use crate::model::SessionConfig;
+    use std::collections::HashMap;
+
+    fn make_vocab(tokens: &[(&str, usize)]) -> HashMap<String, usize> {
+        tokens.iter().map(|(t, id)| (t.to_string(), *id)).collect()
+    }
+
+    #[test]
+    fn test_canary1_prompt_order() {
+        let vocab = make_vocab(&[
+            ("<|startoftranscript|>", 1),
+            ("<|en|>", 2),
+            ("<|de|>", 3),
+            ("<|pnc|>", 4),
+            ("<|noitn|>", 5),
+            ("<|notimestamp|>", 6),
+            ("<|nodiarize|>", 7),
+        ]);
+        let cfg = SessionConfig::default();
+        let tokens = build_default_prompt_tokens(&vocab, 1, "<|en|>", "<|de|>", &cfg);
+        assert_eq!(tokens, vec![1, 2, 3, 4, 5, 6, 7]);
+    }
+
+    #[test]
+    fn test_canary2_prompt_order_with_emotion() {
+        let vocab = make_vocab(&[
+            ("<|startofcontext|>", 10),
+            ("<|startoftranscript|>", 11),
+            ("<|emo:undefined|>", 12),
+            ("<|en|>", 13),
+            ("<|de|>", 14),
+            ("<|pnc|>", 15),
+            ("<|noitn|>", 16),
+            ("<|notimestamp|>", 17),
+            ("<|nodiarize|>", 18),
+        ]);
+        let cfg = SessionConfig::default();
+        let tokens = build_default_prompt_tokens(&vocab, 11, "<|en|>", "<|de|>", &cfg);
+        assert_eq!(tokens, vec![10, 11, 12, 13, 14, 15, 16, 17, 18]);
+    }
+
+    #[test]
+    fn test_canary2_prompt_order_with_override_emotion() {
+        let vocab = make_vocab(&[
+            ("<|startofcontext|>", 20),
+            ("<|startoftranscript|>", 21),
+            ("<|emo:neutral|>", 22),
+            ("<|en|>", 23),
+            ("<|de|>", 24),
+            ("<|pnc|>", 25),
+            ("<|noitn|>", 26),
+            ("<|notimestamp|>", 27),
+            ("<|nodiarize|>", 28),
+        ]);
+        let cfg = SessionConfig::default().with_emotion_token("<|emo:neutral|>");
+        let tokens = build_default_prompt_tokens(&vocab, 21, "<|en|>", "<|de|>", &cfg);
+        assert_eq!(tokens, vec![20, 21, 22, 23, 24, 25, 26, 27, 28]);
     }
 }
