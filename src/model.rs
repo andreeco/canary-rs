@@ -43,6 +43,28 @@ pub struct SessionConfig {
     pub use_timestamps: bool,
     /// Enable diarization tokens in the prompt.
     pub use_diarize: bool,
+    /// Maximum number of decoding steps.
+    pub max_length: usize,
+    /// Beam size for beam search (1 = greedy).
+    pub beam_size: usize,
+    /// Length penalty applied during beam search.
+    pub length_penalty: f32,
+    /// Repetition penalty applied to logits (1.0 = disabled).
+    pub repetition_penalty: f32,
+    /// Minimum logit for suppressing tokens (use f32::NEG_INFINITY to disable).
+    pub suppress_tokens_below: f32,
+    /// Optional list of token ids to suppress during decoding.
+    pub suppress_token_ids: Option<Vec<usize>>,
+    /// Optional emotion token override (Canary2), e.g. "<|emo:neutral|>".
+    pub emotion_token: Option<String>,
+    /// Enable sampling instead of greedy/beam.
+    pub sample: bool,
+    /// Sampling temperature (1.0 = no scaling).
+    pub temperature: f32,
+    /// Top-k sampling (0 disables).
+    pub top_k: usize,
+    /// Top-p (nucleus) sampling (1.0 disables).
+    pub top_p: f32,
 }
 
 impl Default for SessionConfig {
@@ -57,6 +79,17 @@ impl Default for SessionConfig {
             use_itn: false,
             use_timestamps: false,
             use_diarize: false,
+            max_length: 512,
+            beam_size: 1,
+            length_penalty: 1.0,
+            repetition_penalty: 1.0,
+            suppress_tokens_below: f32::NEG_INFINITY,
+            suppress_token_ids: None,
+            emotion_token: None,
+            sample: false,
+            temperature: 1.0,
+            top_k: 0,
+            top_p: 1.0,
         }
     }
 }
@@ -69,6 +102,61 @@ impl SessionConfig {
     pub fn with_decoder_dims(mut self, num_layers: usize, hidden_size: usize) -> Self {
         self.decoder_num_layers = Some(num_layers);
         self.decoder_hidden_size = Some(hidden_size);
+        self
+    }
+
+    pub fn with_max_length(mut self, max_length: usize) -> Self {
+        self.max_length = max_length;
+        self
+    }
+
+    pub fn with_beam_size(mut self, beam_size: usize) -> Self {
+        self.beam_size = beam_size;
+        self
+    }
+
+    pub fn with_length_penalty(mut self, length_penalty: f32) -> Self {
+        self.length_penalty = length_penalty;
+        self
+    }
+
+    pub fn with_repetition_penalty(mut self, repetition_penalty: f32) -> Self {
+        self.repetition_penalty = repetition_penalty;
+        self
+    }
+
+    pub fn with_suppress_tokens(mut self, token_ids: Vec<usize>) -> Self {
+        self.suppress_token_ids = Some(token_ids);
+        self
+    }
+
+    pub fn with_suppress_tokens_below(mut self, threshold: f32) -> Self {
+        self.suppress_tokens_below = threshold;
+        self
+    }
+
+    pub fn with_emotion_token(mut self, token: impl Into<String>) -> Self {
+        self.emotion_token = Some(token.into());
+        self
+    }
+
+    pub fn with_sampling(mut self, enabled: bool) -> Self {
+        self.sample = enabled;
+        self
+    }
+
+    pub fn with_temperature(mut self, temperature: f32) -> Self {
+        self.temperature = temperature;
+        self
+    }
+
+    pub fn with_top_k(mut self, top_k: usize) -> Self {
+        self.top_k = top_k;
+        self
+    }
+
+    pub fn with_top_p(mut self, top_p: f32) -> Self {
+        self.top_p = top_p;
         self
     }
 }

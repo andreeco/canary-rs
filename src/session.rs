@@ -165,8 +165,8 @@ impl CanarySession {
         source_lang: &str,
         target_lang: &str,
     ) -> Result<Vec<(usize, f32)>> {
-        let max_length = 512;
         let session_cfg = &self.model.config.session;
+        let max_length = session_cfg.max_length;
         let preallocate_outputs = session_cfg.preallocate_outputs;
         let preallocate_logits = session_cfg.preallocate_logits;
         let vocab_len = self.model.vocab.len();
@@ -228,93 +228,13 @@ impl CanarySession {
                 Some(spec)
             }
         });
-        let default_prompt_tokens = {
-            let mut tokens = Vec::new();
-            let has_startofcontext = self.model.token_to_id.contains_key("<|startofcontext|>");
-
-            if has_startofcontext {
-                if let Some(&id) = self.model.token_to_id.get("<|startofcontext|>") {
-                    tokens.push(id);
-                }
-                tokens.push(bos_id);
-
-                if let Some(&id) = self.model.token_to_id.get("<|emo:undefined|>") {
-                    tokens.push(id);
-                }
-
-                if let Some(&id) = self.model.token_to_id.get(&source_lang_token) {
-                    tokens.push(id);
-                } else {
-                    log::warn!(
-                        "Source language token '{}' not found in vocabulary",
-                        source_lang_token
-                    );
-                }
-
-                if let Some(&id) = self.model.token_to_id.get(&target_lang_token) {
-                    tokens.push(id);
-                } else {
-                    log::warn!(
-                        "Target language token '{}' not found in vocabulary",
-                        target_lang_token
-                    );
-                }
-            } else {
-                tokens.push(bos_id);
-
-                if let Some(&id) = self.model.token_to_id.get(&source_lang_token) {
-                    tokens.push(id);
-                } else {
-                    log::warn!(
-                        "Source language token '{}' not found in vocabulary",
-                        source_lang_token
-                    );
-                }
-
-                if let Some(&id) = self.model.token_to_id.get(&target_lang_token) {
-                    tokens.push(id);
-                } else {
-                    log::warn!(
-                        "Target language token '{}' not found in vocabulary",
-                        target_lang_token
-                    );
-                }
-            }
-
-            let use_pnc = session_cfg.use_pnc;
-            let pnc_token = if use_pnc { "<|pnc|>" } else { "<|nopnc|>" };
-            if let Some(&id) = self.model.token_to_id.get(pnc_token) {
-                tokens.push(id);
-            }
-
-            let use_itn = session_cfg.use_itn;
-            let itn_token = if use_itn { "<|itn|>" } else { "<|noitn|>" };
-            if let Some(&id) = self.model.token_to_id.get(itn_token) {
-                tokens.push(id);
-            }
-
-            let use_ts = session_cfg.use_timestamps;
-            let ts_token = if use_ts {
-                "<|timestamp|>"
-            } else {
-                "<|notimestamp|>"
-            };
-            if let Some(&id) = self.model.token_to_id.get(ts_token) {
-                tokens.push(id);
-            }
-
-            let use_diarize = session_cfg.use_diarize;
-            let diarize_token = if use_diarize {
-                "<|diarize|>"
-            } else {
-                "<|nodiarize|>"
-            };
-            if let Some(&id) = self.model.token_to_id.get(diarize_token) {
-                tokens.push(id);
-            }
-
-            tokens
-        };
+        let default_prompt_tokens = build_default_prompt_tokens(
+            self.model.token_to_id.as_ref(),
+            bos_id,
+            &source_lang_token,
+            &target_lang_token,
+            session_cfg,
+        );
         let prompt_tokens = if let Some(spec) = prompt_override {
             let tokens = parse_prompt_override(self.model.token_to_id.as_ref(), vocab_len, spec);
             if tokens.is_empty() {
@@ -539,85 +459,319 @@ impl CanarySession {
             (last_logits, Some(decoder_mems))
         };
 
-        // Step 3: Autoregressive generation (incremental, one token at a time)
-        for _step in 0..max_length {
-            let (max_idx, max_val) = last_logits
-                .iter()
-                .enumerate()
-                .max_by(|(_, a), (_, b)| cmp_logits(a, b))
-                .unwrap_or((eos_id, &f32::NEG_INFINITY));
+        // Step 3: Autoregressive generation (greedy or beam search).
+        let beam_size = session_cfg.beam_size.max(1);
+        let length_penalty = session_cfg.length_penalty;
+        let repetition_penalty = session_cfg.repetition_penalty;
+        let suppress_below = session_cfg.suppress_tokens_below;
+        let suppress_ids = session_cfg.suppress_token_ids.as_deref();
 
-            let next_token = max_idx;
-
-            if next_token == eos_id {
-                break;
+        let apply_penalties = |logits: &mut [f32], seen: &[usize]| {
+            if repetition_penalty > 1.0 {
+                for &id in seen {
+                    if let Some(l) = logits.get_mut(id) {
+                        if *l > 0.0 {
+                            *l /= repetition_penalty;
+                        } else {
+                            *l *= repetition_penalty;
+                        }
+                    }
+                }
             }
+            if suppress_below.is_finite() {
+                for l in logits.iter_mut() {
+                    if *l < suppress_below {
+                        *l = f32::NEG_INFINITY;
+                    }
+                }
+            }
+            if let Some(ids) = suppress_ids {
+                for &id in ids {
+                    if let Some(l) = logits.get_mut(id) {
+                        *l = f32::NEG_INFINITY;
+                    }
+                }
+            }
+        };
 
-            let prob = {
-                let max_logit = *max_val;
-                let sum_exp: f32 = last_logits.iter().map(|&x| (x - max_logit).exp()).sum();
-                1.0 / sum_exp
-            };
+        if beam_size == 1 {
+            let mut seen: Vec<usize> = Vec::new();
+            let mut rng_state: u64 = 0x9E3779B97F4A7C15;
+            for _step in 0..max_length {
+                apply_penalties(&mut last_logits, &seen);
 
-            generated.push((next_token, prob));
+                let use_sampling = session_cfg.sample;
+                let temperature = session_cfg.temperature.max(1e-5);
+                let top_k = session_cfg.top_k;
+                let top_p = session_cfg.top_p;
 
-            let input_ids_i64 = vec![next_token as i64];
-            let tokens_tensor = Tensor::<i64>::from_array(([1, 1], input_ids_i64))?;
+                let mut logits = last_logits.clone();
+                if temperature != 1.0 {
+                    for l in logits.iter_mut() {
+                        *l /= temperature;
+                    }
+                }
 
-            let mems_to_use = decoder_mems.take().ok_or_else(|| {
-                CanaryError::InferenceError("Missing decoder cache during generation".into())
-            })?;
+                let mut candidates: Vec<(usize, f32)> =
+                    logits.iter().copied().enumerate().collect();
+                candidates.sort_by(|a, b| cmp_logits(&b.1, &a.1));
+                if top_k > 0 && candidates.len() > top_k {
+                    candidates.truncate(top_k);
+                }
 
-            let input_len = 1;
-            let mems_len = cache_len;
-            let (new_logits, new_mems) = if preallocate_outputs {
-                let mems_shape = Shape::new([
-                    num_layers as i64,
-                    1,
-                    (mems_len + input_len) as i64,
-                    hidden as i64,
-                ]);
-                let mems_prealloc =
-                    DynTensor::new(decoder.allocator(), TensorElementType::Float32, mems_shape)?;
-                let mut output_selector =
-                    OutputSelector::default().preallocate("decoder_hidden_states", mems_prealloc);
-                if preallocate_logits {
-                    let logits_shape = Shape::new([1, input_len as i64, vocab_len as i64]);
-                    let logits_prealloc = DynTensor::new(
+                if top_p < 1.0 && !candidates.is_empty() {
+                    let max_logit = candidates
+                        .iter()
+                        .map(|(_, l)| *l)
+                        .fold(f32::NEG_INFINITY, |a, b| a.max(b));
+                    let mut probs: Vec<(usize, f32)> = candidates
+                        .iter()
+                        .map(|(id, l)| (*id, (*l - max_logit).exp()))
+                        .collect();
+                    let sum: f32 = probs.iter().map(|(_, p)| *p).sum();
+                    if sum > 0.0 {
+                        for (_, p) in probs.iter_mut() {
+                            *p /= sum;
+                        }
+                        let mut cum = 0.0f32;
+                        let mut filtered: Vec<(usize, f32)> = Vec::new();
+                        for (id, p) in probs {
+                            cum += p;
+                            filtered.push((id, p));
+                            if cum >= top_p {
+                                break;
+                            }
+                        }
+                        candidates = filtered.into_iter().map(|(id, p)| (id, p.ln())).collect();
+                    }
+                }
+
+                let next_token = if use_sampling && !candidates.is_empty() {
+                    rng_state = rng_state.wrapping_mul(6364136223846793005).wrapping_add(1);
+                    let r = ((rng_state >> 33) as f32) / ((1u64 << 31) as f32);
+
+                    let max_logit = candidates
+                        .iter()
+                        .map(|(_, l)| *l)
+                        .fold(f32::NEG_INFINITY, |a, b| a.max(b));
+                    let mut sum_exp = 0.0f32;
+                    let mut exp_probs: Vec<(usize, f32)> = Vec::with_capacity(candidates.len());
+                    for (id, l) in &candidates {
+                        let v = (*l - max_logit).exp();
+                        sum_exp += v;
+                        exp_probs.push((*id, v));
+                    }
+                    let mut acc = 0.0f32;
+                    let mut chosen = exp_probs[0].0;
+                    for (id, v) in exp_probs {
+                        acc += v / sum_exp;
+                        if r <= acc {
+                            chosen = id;
+                            break;
+                        }
+                    }
+                    chosen
+                } else {
+                    candidates
+                        .iter()
+                        .max_by(|(_, a), (_, b)| cmp_logits(a, b))
+                        .map(|(i, _)| *i)
+                        .unwrap_or(eos_id)
+                };
+
+                if next_token == eos_id {
+                    break;
+                }
+
+                let prob = {
+                    let max_logit = last_logits
+                        .iter()
+                        .copied()
+                        .fold(f32::NEG_INFINITY, |a, b| a.max(b));
+                    let sum_exp: f32 = last_logits.iter().map(|&x| (x - max_logit).exp()).sum();
+                    if sum_exp == 0.0 {
+                        0.0
+                    } else {
+                        (last_logits[next_token] - max_logit).exp() / sum_exp
+                    }
+                };
+
+                generated.push((next_token, prob));
+                seen.push(next_token);
+
+                let input_ids_i64 = vec![next_token as i64];
+                let tokens_tensor = Tensor::<i64>::from_array(([1, 1], input_ids_i64))?;
+
+                let mems_to_use = decoder_mems.take().ok_or_else(|| {
+                    CanaryError::InferenceError("Missing decoder cache during generation".into())
+                })?;
+
+                let input_len = 1;
+                let mems_len = cache_len;
+                let (new_logits, new_mems) = if preallocate_outputs {
+                    let mems_shape = Shape::new([
+                        num_layers as i64,
+                        1,
+                        (mems_len + input_len) as i64,
+                        hidden as i64,
+                    ]);
+                    let mems_prealloc = DynTensor::new(
                         decoder.allocator(),
                         TensorElementType::Float32,
-                        logits_shape,
+                        mems_shape,
                     )?;
-                    output_selector = output_selector.preallocate("logits", logits_prealloc);
-                }
-                let run_options = RunOptions::new()?.with_outputs(output_selector);
-                let outputs = decoder.run_with_options(
-                    ort::inputs![
+                    let mut output_selector = OutputSelector::default()
+                        .preallocate("decoder_hidden_states", mems_prealloc);
+                    if preallocate_logits {
+                        let logits_shape = Shape::new([1, input_len as i64, vocab_len as i64]);
+                        let logits_prealloc = DynTensor::new(
+                            decoder.allocator(),
+                            TensorElementType::Float32,
+                            logits_shape,
+                        )?;
+                        output_selector = output_selector.preallocate("logits", logits_prealloc);
+                    }
+                    let run_options = RunOptions::new()?.with_outputs(output_selector);
+                    let outputs = decoder.run_with_options(
+                        ort::inputs![
+                            "input_ids" => tokens_tensor,
+                            "encoder_embeddings" => &encoded_tensor,
+                            "encoder_mask" => &mask_tensor,
+                            "decoder_mems" => mems_to_use,
+                        ],
+                        &run_options,
+                    )?;
+                    let last_logits = extract_last_logits(&outputs)?;
+                    let decoder_mems = extract_decoder_mems(&outputs, num_layers, hidden)?;
+                    (last_logits, decoder_mems)
+                } else {
+                    let outputs = decoder.run(ort::inputs![
                         "input_ids" => tokens_tensor,
                         "encoder_embeddings" => &encoded_tensor,
                         "encoder_mask" => &mask_tensor,
                         "decoder_mems" => mems_to_use,
-                    ],
-                    &run_options,
-                )?;
-                let last_logits = extract_last_logits(&outputs)?;
-                let decoder_mems = extract_decoder_mems(&outputs, num_layers, hidden)?;
-                (last_logits, decoder_mems)
-            } else {
-                let outputs = decoder.run(ort::inputs![
-                    "input_ids" => tokens_tensor,
-                    "encoder_embeddings" => &encoded_tensor,
-                    "encoder_mask" => &mask_tensor,
-                    "decoder_mems" => mems_to_use,
-                ])?;
-                let last_logits = extract_last_logits(&outputs)?;
-                let decoder_mems = extract_decoder_mems(&outputs, num_layers, hidden)?;
-                (last_logits, decoder_mems)
-            };
+                    ])?;
+                    let last_logits = extract_last_logits(&outputs)?;
+                    let decoder_mems = extract_decoder_mems(&outputs, num_layers, hidden)?;
+                    (last_logits, decoder_mems)
+                };
 
-            last_logits = new_logits;
-            decoder_mems = Some(new_mems);
-            cache_len += 1;
+                last_logits = new_logits;
+                decoder_mems = Some(new_mems);
+                cache_len += 1;
+            }
+
+            return Ok(generated);
+        }
+
+        // Beam search without cache reuse (robust, slower).
+        struct Beam {
+            tokens: Vec<usize>,
+            token_probs: Vec<f32>,
+            score: f32,
+            finished: bool,
+        }
+
+        let mut beams = vec![Beam {
+            tokens: Vec::new(),
+            token_probs: Vec::new(),
+            score: 0.0,
+            finished: false,
+        }];
+
+        let run_full_decoder = |decoder: &mut Session, input_ids: &[i64]| -> Result<Vec<f32>> {
+            let tokens_tensor =
+                Tensor::<i64>::from_array(([1, input_ids.len()], input_ids.to_vec()))?;
+            let empty_mems = empty_mems_tensor(decoder.allocator(), num_layers, hidden)?;
+            let outputs = decoder.run(ort::inputs![
+                "input_ids" => tokens_tensor,
+                "encoder_embeddings" => &encoded_tensor,
+                "encoder_mask" => &mask_tensor,
+                "decoder_mems" => empty_mems,
+            ])?;
+            extract_last_logits(&outputs)
+        };
+
+        for _step in 0..max_length {
+            let mut all_candidates: Vec<Beam> = Vec::new();
+
+            for beam in &beams {
+                if beam.finished {
+                    all_candidates.push(Beam {
+                        tokens: beam.tokens.clone(),
+                        token_probs: beam.token_probs.clone(),
+                        score: beam.score,
+                        finished: true,
+                    });
+                    continue;
+                }
+
+                let mut input_ids: Vec<i64> = prompt_tokens.iter().map(|&t| t as i64).collect();
+                input_ids.extend(beam.tokens.iter().map(|&t| t as i64));
+
+                let mut logits = run_full_decoder(&mut decoder, &input_ids)?;
+                apply_penalties(&mut logits, &beam.tokens);
+
+                let max_logit = logits
+                    .iter()
+                    .copied()
+                    .fold(f32::NEG_INFINITY, |a, b| a.max(b));
+                let mut sum_exp = 0.0f32;
+                for &l in &logits {
+                    sum_exp += (l - max_logit).exp();
+                }
+
+                let mut scored: Vec<(usize, f32)> = logits
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &l)| (i, l - max_logit - sum_exp.ln()))
+                    .collect();
+
+                scored.sort_by(|a, b| cmp_logits(&b.1, &a.1));
+                scored.truncate(beam_size);
+
+                for (token_id, logp) in scored {
+                    let mut new_tokens = beam.tokens.clone();
+                    let mut new_probs = beam.token_probs.clone();
+                    if token_id == eos_id {
+                        let length = new_tokens.len().max(1) as f32;
+                        let norm = length.powf(length_penalty);
+                        all_candidates.push(Beam {
+                            tokens: new_tokens,
+                            token_probs: new_probs,
+                            score: beam.score / norm,
+                            finished: true,
+                        });
+                        continue;
+                    }
+                    new_tokens.push(token_id);
+                    new_probs.push(logp.exp());
+
+                    all_candidates.push(Beam {
+                        tokens: new_tokens,
+                        token_probs: new_probs,
+                        score: beam.score + logp,
+                        finished: false,
+                    });
+                }
+            }
+
+            all_candidates.sort_by(|a, b| cmp_logits(&b.score, &a.score));
+            all_candidates.truncate(beam_size);
+            beams = all_candidates;
+
+            if beams.iter().all(|b| b.finished) {
+                break;
+            }
+        }
+
+        if let Some(best) = beams.first() {
+            generated = best
+                .tokens
+                .iter()
+                .zip(best.token_probs.iter())
+                .map(|(&t, &p)| (t, p))
+                .collect();
         }
 
         Ok(generated)
@@ -686,5 +840,172 @@ impl CanarySession {
             text: text.trim().to_string(),
             tokens: result_tokens,
         })
+    }
+}
+
+pub(crate) fn build_default_prompt_tokens(
+    token_to_id: &HashMap<String, usize>,
+    bos_id: usize,
+    source_lang_token: &str,
+    target_lang_token: &str,
+    session_cfg: &crate::model::SessionConfig,
+) -> Vec<usize> {
+    let mut tokens = Vec::new();
+    let has_startofcontext = token_to_id.contains_key("<|startofcontext|>");
+
+    if has_startofcontext {
+        if let Some(&id) = token_to_id.get("<|startofcontext|>") {
+            tokens.push(id);
+        }
+        tokens.push(bos_id);
+
+        if let Some(token) = session_cfg
+            .emotion_token
+            .as_deref()
+            .filter(|t| !t.trim().is_empty())
+        {
+            if let Some(&id) = token_to_id.get(token) {
+                tokens.push(id);
+            } else {
+                log::warn!("Emotion token '{}' not found in vocabulary", token);
+            }
+        } else if let Some(&id) = token_to_id.get("<|emo:undefined|>") {
+            tokens.push(id);
+        }
+
+        if let Some(&id) = token_to_id.get(source_lang_token) {
+            tokens.push(id);
+        } else {
+            log::warn!(
+                "Source language token '{}' not found in vocabulary",
+                source_lang_token
+            );
+        }
+
+        if let Some(&id) = token_to_id.get(target_lang_token) {
+            tokens.push(id);
+        } else {
+            log::warn!(
+                "Target language token '{}' not found in vocabulary",
+                target_lang_token
+            );
+        }
+    } else {
+        tokens.push(bos_id);
+
+        if let Some(&id) = token_to_id.get(source_lang_token) {
+            tokens.push(id);
+        } else {
+            log::warn!(
+                "Source language token '{}' not found in vocabulary",
+                source_lang_token
+            );
+        }
+
+        if let Some(&id) = token_to_id.get(target_lang_token) {
+            tokens.push(id);
+        } else {
+            log::warn!(
+                "Target language token '{}' not found in vocabulary",
+                target_lang_token
+            );
+        }
+    }
+
+    let use_pnc = session_cfg.use_pnc;
+    let pnc_token = if use_pnc { "<|pnc|>" } else { "<|nopnc|>" };
+    if let Some(&id) = token_to_id.get(pnc_token) {
+        tokens.push(id);
+    }
+
+    let use_itn = session_cfg.use_itn;
+    let itn_token = if use_itn { "<|itn|>" } else { "<|noitn|>" };
+    if let Some(&id) = token_to_id.get(itn_token) {
+        tokens.push(id);
+    }
+
+    let use_ts = session_cfg.use_timestamps;
+    let ts_token = if use_ts {
+        "<|timestamp|>"
+    } else {
+        "<|notimestamp|>"
+    };
+    if let Some(&id) = token_to_id.get(ts_token) {
+        tokens.push(id);
+    }
+
+    let use_diarize = session_cfg.use_diarize;
+    let diarize_token = if use_diarize {
+        "<|diarize|>"
+    } else {
+        "<|nodiarize|>"
+    };
+    if let Some(&id) = token_to_id.get(diarize_token) {
+        tokens.push(id);
+    }
+
+    tokens
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_default_prompt_tokens;
+    use crate::model::SessionConfig;
+    use std::collections::HashMap;
+
+    fn make_vocab(tokens: &[(&str, usize)]) -> HashMap<String, usize> {
+        tokens.iter().map(|(t, id)| (t.to_string(), *id)).collect()
+    }
+
+    #[test]
+    fn test_canary1_prompt_order() {
+        let vocab = make_vocab(&[
+            ("<|startoftranscript|>", 1),
+            ("<|en|>", 2),
+            ("<|de|>", 3),
+            ("<|pnc|>", 4),
+            ("<|noitn|>", 5),
+            ("<|notimestamp|>", 6),
+            ("<|nodiarize|>", 7),
+        ]);
+        let cfg = SessionConfig::default();
+        let tokens = build_default_prompt_tokens(&vocab, 1, "<|en|>", "<|de|>", &cfg);
+        assert_eq!(tokens, vec![1, 2, 3, 4, 5, 6, 7]);
+    }
+
+    #[test]
+    fn test_canary2_prompt_order_with_emotion() {
+        let vocab = make_vocab(&[
+            ("<|startofcontext|>", 10),
+            ("<|startoftranscript|>", 11),
+            ("<|emo:undefined|>", 12),
+            ("<|en|>", 13),
+            ("<|de|>", 14),
+            ("<|pnc|>", 15),
+            ("<|noitn|>", 16),
+            ("<|notimestamp|>", 17),
+            ("<|nodiarize|>", 18),
+        ]);
+        let cfg = SessionConfig::default();
+        let tokens = build_default_prompt_tokens(&vocab, 11, "<|en|>", "<|de|>", &cfg);
+        assert_eq!(tokens, vec![10, 11, 12, 13, 14, 15, 16, 17, 18]);
+    }
+
+    #[test]
+    fn test_canary2_prompt_order_with_override_emotion() {
+        let vocab = make_vocab(&[
+            ("<|startofcontext|>", 20),
+            ("<|startoftranscript|>", 21),
+            ("<|emo:neutral|>", 22),
+            ("<|en|>", 23),
+            ("<|de|>", 24),
+            ("<|pnc|>", 25),
+            ("<|noitn|>", 26),
+            ("<|notimestamp|>", 27),
+            ("<|nodiarize|>", 28),
+        ]);
+        let cfg = SessionConfig::default().with_emotion_token("<|emo:neutral|>");
+        let tokens = build_default_prompt_tokens(&vocab, 21, "<|en|>", "<|de|>", &cfg);
+        assert_eq!(tokens, vec![20, 21, 22, 23, 24, 25, 26, 27, 28]);
     }
 }

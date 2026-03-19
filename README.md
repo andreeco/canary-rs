@@ -19,7 +19,7 @@ or for int8 quantization:
 
 and place them in a directory, e.g., `canary-1b-v2`.
 
-```rust
+```
 use canary_rs::{Canary, StreamConfig};
 
 let model = Canary::from_pretrained("canary-1b-v2", None)?;
@@ -40,6 +40,29 @@ let stream_cfg = StreamConfig::new().with_window_duration(10.0).with_step_durati
 let mut stream = model.stream("en", "en", stream_cfg)?;
 // stream.push_samples(&audio_chunk, sample_rate, channels)?;
 ```
+
+## Prompt formats (Canary1 vs Canary2)
+
+This crate auto-detects Canary2 prompt format when the vocabulary contains `<|startofcontext|>`. In that case it uses:
+
+- `<|startofcontext|> <|startoftranscript|> <|emo:undefined|> <|source_lang|> <|target_lang|> <|pnc|> <|noitn|> <|notimestamp|> <|nodiarize|>`
+
+If `<|startofcontext|>` is absent, it falls back to Canary1-style prompts:
+
+- `<|startoftranscript|> <|source_lang|> <|target_lang|> <|pnc|> <|noitn|> <|notimestamp|> <|nodiarize|>`
+
+You can always override the prompt explicitly with `SessionConfig::prompt_override`.
+
+## Decoding options
+
+Decoding is configurable via `SessionConfig`:
+- `beam_size` (1 = greedy, >1 enables beam search)
+- `max_length`
+- `length_penalty`
+- `repetition_penalty`
+- `suppress_tokens_below` and `suppress_token_ids` for logit masking
+- `sample`, `temperature`, `top_k`, `top_p` for sampling
+- `emotion_token` for Canary2 emotion overrides
 
 ## Features
 
