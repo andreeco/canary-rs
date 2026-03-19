@@ -528,7 +528,7 @@ impl CanarySession {
                         .iter()
                         .map(|(id, l)| (*id, (*l - max_logit).exp()))
                         .collect();
-                    let mut sum: f32 = probs.iter().map(|(_, p)| *p).sum();
+                    let sum: f32 = probs.iter().map(|(_, p)| *p).sum();
                     if sum > 0.0 {
                         for (_, p) in probs.iter_mut() {
                             *p /= sum;

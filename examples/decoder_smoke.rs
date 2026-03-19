@@ -1,6 +1,5 @@
 use ort::session::Session;
-use ort::tensor::{Shape, TensorElementType};
-use ort::value::{DynTensor, Tensor};
+use ort::value::{DynTensor, Shape, Tensor, TensorElementType};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     if std::env::var("CANARY_LOAD_ENCODER")
