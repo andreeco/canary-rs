@@ -895,6 +895,8 @@ pub(crate) fn build_default_prompt_tokens(
                     log::warn!("Decoder context token '{}' not found in vocabulary", token);
                 }
             }
+        } else if let Some(&id) = token_to_id.get("<|startofcontext|>") {
+            tokens.push(id);
         }
         tokens.push(bos_id);
 
