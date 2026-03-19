@@ -229,24 +229,56 @@ impl CanarySession {
             }
         });
         let default_prompt_tokens = {
-            let mut tokens = vec![bos_id];
+            let mut tokens = Vec::new();
+            let has_startofcontext = self.model.token_to_id.contains_key("<|startofcontext|>");
 
-            if let Some(&id) = self.model.token_to_id.get(&target_lang_token) {
-                tokens.push(id);
-            } else {
-                log::warn!(
-                    "Target language token '{}' not found in vocabulary",
-                    target_lang_token
-                );
-            }
+            if has_startofcontext {
+                if let Some(&id) = self.model.token_to_id.get("<|startofcontext|>") {
+                    tokens.push(id);
+                }
+                tokens.push(bos_id);
 
-            if let Some(&id) = self.model.token_to_id.get(&source_lang_token) {
-                tokens.push(id);
+                if let Some(&id) = self.model.token_to_id.get("<|emo:undefined|>") {
+                    tokens.push(id);
+                }
+
+                if let Some(&id) = self.model.token_to_id.get(&source_lang_token) {
+                    tokens.push(id);
+                } else {
+                    log::warn!(
+                        "Source language token '{}' not found in vocabulary",
+                        source_lang_token
+                    );
+                }
+
+                if let Some(&id) = self.model.token_to_id.get(&target_lang_token) {
+                    tokens.push(id);
+                } else {
+                    log::warn!(
+                        "Target language token '{}' not found in vocabulary",
+                        target_lang_token
+                    );
+                }
             } else {
-                log::warn!(
-                    "Source language token '{}' not found in vocabulary",
-                    source_lang_token
-                );
+                tokens.push(bos_id);
+
+                if let Some(&id) = self.model.token_to_id.get(&source_lang_token) {
+                    tokens.push(id);
+                } else {
+                    log::warn!(
+                        "Source language token '{}' not found in vocabulary",
+                        source_lang_token
+                    );
+                }
+
+                if let Some(&id) = self.model.token_to_id.get(&target_lang_token) {
+                    tokens.push(id);
+                } else {
+                    log::warn!(
+                        "Target language token '{}' not found in vocabulary",
+                        target_lang_token
+                    );
+                }
             }
 
             let use_pnc = session_cfg.use_pnc;
@@ -318,8 +350,8 @@ impl CanarySession {
             Tensor::from_array((mask_shape.as_slice(), mask_data.clone()))?
         } else {
             // Fallback: create a mask of all ones
-            let mask_vec: Vec<i64> = vec![1; encoded_shape[0] * 1 * encoded_shape[2]];
-            Tensor::from_array(([encoded_shape[0], 1, encoded_shape[2]], mask_vec))?
+            let mask_vec: Vec<i64> = vec![1; encoded_shape[0] * encoded_shape[2]];
+            Tensor::from_array(([encoded_shape[0], encoded_shape[2]], mask_vec))?
         };
 
         // Autoregressive decoding.
