@@ -19,7 +19,7 @@ For int8 quantized models:
 
 and place them in a directory, e.g., `canary-1b-v2`.
 
-```rust
+```
 use canary_rs::{Canary, StreamConfig};
 
 let model = Canary::from_pretrained("canary-1b-v2", None)?;
@@ -41,7 +41,30 @@ let mut stream = model.stream("en", "en", stream_cfg)?;
 // stream.push_samples(&audio_chunk, sample_rate, channels)?;
 ```
 
-**Note**: When using `canary-180m-flash` don't enable the `use_itn` option in `SessionConfig`, as this model doesn't seem to be trained with inverse text normalization and enabling it causes empty output.
+**Note**: When using `canary-180m-flash`, omit the ITN prompt token (`SessionConfig::with_itn(None)`) because this model does not appear to be trained with inverse text normalization and may produce empty output when ITN controls are present.
+
+## Prompt formats (Canary1 vs Canary2)
+
+This crate auto-detects Canary2 prompt format when the vocabulary contains `<|startofcontext|>`. In that case it uses:
+
+- `<|startofcontext|> <|startoftranscript|> <|emo:undefined|> <|source_lang|> <|target_lang|> <|pnc|> <|noitn|> <|notimestamp|> <|nodiarize|>`
+
+If `<|startofcontext|>` is absent, it falls back to Canary1-style prompts:
+
+- `<|startoftranscript|> <|source_lang|> <|target_lang|> <|pnc|> <|noitn|> <|notimestamp|> <|nodiarize|>`
+
+You can always override the prompt explicitly with `SessionConfig::prompt_override`.
+
+## Decoding options
+
+Decoding is configurable via `SessionConfig`:
+- `beam_size` (1 = greedy, >1 enables beam search)
+- `max_length`
+- `length_penalty`
+- `repetition_penalty`
+- `suppress_tokens_below` and `suppress_token_ids` for logit masking
+- `sample`, `temperature`, `top_k`, `top_p` for sampling
+- `emotion_token` for Canary2 emotion overrides
 
 ## Features
 
