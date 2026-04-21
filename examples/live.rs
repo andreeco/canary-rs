@@ -1,4 +1,7 @@
-use canary_rs::{Canary, ExecutionConfig, ExecutionProvider, StreamConfig};
+use canary_rs::{
+    Canary, /* CoreMLComputeUnits, CoreMLSpecializationStrategy, */ ExecutionConfig,
+    ExecutionProvider, StreamConfig,
+};
 use cpal::Sample;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use std::io::Write;
@@ -29,6 +32,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Loading Canary model...");
 
     let config = ExecutionConfig::new().with_execution_provider(ExecutionProvider::Cpu);
+    /* let config = ExecutionConfig::new()
+    .with_execution_provider(ExecutionProvider::CoreML)
+    .with_coreml_compute_units(CoreMLComputeUnits::CPUAndNeuralEngine)
+    // .with_coreml_model_format(CoreMLModelFormat::MLProgram)
+    .with_coreml_low_precision(true)
+    .with_coreml_specialization_strategy(CoreMLSpecializationStrategy::FastPrediction); */
+
     let model = Canary::from_pretrained("canary-180m-flash", Some(config))?;
     let stream_cfg = StreamConfig::new()
         .with_window_duration(8.0)
@@ -142,7 +152,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     &source_lang,
                                     &target_lang,
                                 )?;
-                                let final_text = final_result.text.trim();
+                                let final_text =
+                                    normalize_punctuation_spacing(final_result.text.trim());
                                 if !final_text.is_empty() {
                                     if last_len > 0 {
                                         print!("\r{:<width$}", "", width = last_len);
@@ -177,7 +188,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         continue;
                     }
 
-                    append_with_space(&mut final_line, delta);
+                    let delta = normalize_punctuation_spacing(delta);
+                    let delta = strip_duplicate_leading_punct(&final_line, &delta);
+                    if delta.is_empty() {
+                        continue;
+                    }
+
+                    append_with_space(&mut final_line, &delta);
 
                     let mut line_break = false;
                     if ends_with_sentence_punct(&final_line) {
@@ -257,7 +274,59 @@ fn append_with_space(line: &mut String, chunk: &str) {
 }
 
 fn starts_with_punct(text: &str) -> bool {
-    text.chars()
-        .next()
-        .map_or(false, |ch| matches!(ch, '.' | ',' | '!' | '?' | ';' | ':'))
+    text.chars().next().map_or(false, is_tight_punct)
+}
+
+fn is_tight_punct(ch: char) -> bool {
+    matches!(ch, '.' | ',' | '!' | '?' | ';' | ':')
+}
+
+fn normalize_punctuation_spacing(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut pending_space = false;
+
+    for ch in text.chars() {
+        if ch.is_whitespace() {
+            pending_space = true;
+            continue;
+        }
+
+        if is_tight_punct(ch) {
+            if out.ends_with(' ') {
+                out.pop();
+            }
+            out.push(ch);
+            pending_space = false;
+            continue;
+        }
+
+        if pending_space && !out.is_empty() {
+            out.push(' ');
+        }
+        out.push(ch);
+        pending_space = false;
+    }
+
+    out
+}
+
+fn strip_duplicate_leading_punct(line: &str, chunk: &str) -> String {
+    let last_punct = line
+        .chars()
+        .rev()
+        .find(|ch| !ch.is_whitespace())
+        .filter(|ch| is_tight_punct(*ch));
+
+    let mut chars = chunk.chars().peekable();
+    if let Some(last_punct) = last_punct {
+        while let Some(&ch) = chars.peek() {
+            if ch == last_punct {
+                chars.next();
+                continue;
+            }
+            break;
+        }
+    }
+
+    chars.collect()
 }

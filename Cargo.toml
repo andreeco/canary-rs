@@ -1,6 +1,6 @@
 [package]
 name = "canary-rs"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 description = "Rust implementation of NVIDIA Canary ASR/AST using ONNX Runtime"
 license = "MIT"
@@ -13,17 +13,17 @@ name = "canary_rs"
 path = "src/lib.rs"
 
 [dependencies]
-ort = { version = "2.0.0-rc.11" }
-hound = "3.5"
+ort = { version = "2.0.0-rc.12" }
+hound = "3.5.1"
 ndarray = "0.17.2"
-thiserror = "2.0"
-rubato = "1.0.0"
-audioadapter-buffers = "2.0"
+thiserror = "2.0.18"
+rubato = "2.0.0"
+audioadapter-buffers = "3.0.0"
 rustfft = "6.2"
 log = "0.4"
 
 [dev-dependencies]
-cpal = "0.17.1"
+cpal = "0.17.3"
 
 [features]
 default = ["cpu", "ort-defaults"]

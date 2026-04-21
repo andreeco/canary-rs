@@ -273,6 +273,8 @@ impl CanaryStream {
             self.recent_texts.clear();
             return String::new();
         }
+        let normalized = normalize_punctuation_spacing(window_text);
+        let window_text = normalized.trim();
         let delta_text = if self.stability_window > 1 {
             self.recent_texts.push_back(window_text.to_string());
             while self.recent_texts.len() > self.stability_window {
@@ -289,6 +291,7 @@ impl CanaryStream {
         } else {
             delta_text_words(&self.last_text, window_text)
         };
+        let delta_text = normalize_punctuation_spacing(&delta_text);
 
         self.last_text = window_text.to_string();
         delta_text
@@ -404,4 +407,37 @@ fn is_prefix_words(haystack: &[&str], needle: &[&str]) -> bool {
         return false;
     }
     haystack[..needle.len()] == needle[..]
+}
+
+fn normalize_punctuation_spacing(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut pending_space = false;
+
+    for ch in text.chars() {
+        if ch.is_whitespace() {
+            pending_space = true;
+            continue;
+        }
+
+        if is_tight_punct(ch) {
+            if out.ends_with(' ') {
+                out.pop();
+            }
+            out.push(ch);
+            pending_space = false;
+            continue;
+        }
+
+        if pending_space && !out.is_empty() {
+            out.push(' ');
+        }
+        out.push(ch);
+        pending_space = false;
+    }
+
+    out
+}
+
+fn is_tight_punct(ch: char) -> bool {
+    matches!(ch, '.' | ',' | '!' | '?' | ';' | ':')
 }

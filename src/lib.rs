@@ -6,6 +6,11 @@ mod stream;
 mod types;
 
 pub use model::{Canary, ExecutionConfig, ExecutionProvider, SessionConfig};
+pub use ort::ep::coreml::{
+    ComputeUnits as CoreMLComputeUnits,
+    ModelFormat as CoreMLModelFormat,
+    SpecializationStrategy as CoreMLSpecializationStrategy,
+};
 pub use session::CanarySession;
 pub use stream::{CanaryStream, StreamChunk, StreamConfig};
 pub use types::{CanaryError, CanaryResult, Result, Token};

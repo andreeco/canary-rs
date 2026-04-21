@@ -3,7 +3,7 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 pub enum CanaryError {
     #[error("ONNX Runtime error: {0}")]
-    OrtError(#[from] ort::Error),
+    OrtError(String),
 
     #[error("IO error: {0}")]
     IoError(#[from] std::io::Error),
@@ -19,6 +19,12 @@ pub enum CanaryError {
 }
 
 pub type Result<T> = std::result::Result<T, CanaryError>;
+
+impl<R> From<ort::Error<R>> for CanaryError {
+    fn from(error: ort::Error<R>) -> Self {
+        Self::OrtError(error.to_string())
+    }
+}
 
 /// Token with timestamp information
 #[derive(Debug, Clone)]

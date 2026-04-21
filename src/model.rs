@@ -94,6 +94,19 @@ pub struct ExecutionConfig {
     pub ort_verbose: bool,
     /// Optional CoreML model cache directory.
     pub coreml_cache_dir: Option<String>,
+    /// Which compute unit(s) to use for CoreML (if applicable).
+    /// Defaults to `CPUAndNeuralEngine`.
+    pub coreml_compute_units: Option<ort::ep::coreml::ComputeUnits>,
+    /// Use low precision data (float16 instead of float32) to accumulate in CoreML.
+    pub coreml_low_precision: bool,
+    /// Preferred CoreML model format (NeuralNetwork or MLProgram).
+    pub coreml_model_format: Option<ort::ep::coreml::ModelFormat>,
+    /// Only allow CoreML to take nodes with static input shapes.
+    pub coreml_static_input_shapes: bool,
+    /// Enable CoreML execution on subgraphs within control-flow operators.
+    pub coreml_enable_subgraphs: bool,
+    /// CoreML specialization strategy (e.g. FastPrediction).
+    pub coreml_specialization_strategy: Option<ort::ep::coreml::SpecializationStrategy>,
     /// Decoder/session runtime options.
     pub session: SessionConfig,
 }
@@ -110,6 +123,12 @@ impl ExecutionConfig {
             disable_ort_prepack: false,
             ort_verbose: false,
             coreml_cache_dir: None,
+            coreml_compute_units: None,
+            coreml_low_precision: false,
+            coreml_model_format: None,
+            coreml_static_input_shapes: false,
+            coreml_enable_subgraphs: false,
+            coreml_specialization_strategy: None,
             session: SessionConfig::default(),
         }
     }
@@ -125,13 +144,49 @@ impl ExecutionConfig {
         self
     }
 
-    pub fn with_session_config(mut self, session: SessionConfig) -> Self {
-        self.session = session;
+    pub fn with_coreml_cache_dir(mut self, dir: impl Into<String>) -> Self {
+        self.coreml_cache_dir = Some(dir.into());
         self
     }
 
-    pub fn with_coreml_cache_dir(mut self, dir: impl Into<String>) -> Self {
-        self.coreml_cache_dir = Some(dir.into());
+    pub fn with_coreml_compute_units(
+        mut self,
+        compute_units: ort::ep::coreml::ComputeUnits,
+    ) -> Self {
+        self.coreml_compute_units = Some(compute_units);
+        self
+    }
+
+    pub fn with_coreml_low_precision(mut self, low_precision: bool) -> Self {
+        self.coreml_low_precision = low_precision;
+        self
+    }
+
+    pub fn with_coreml_model_format(mut self, model_format: ort::ep::coreml::ModelFormat) -> Self {
+        self.coreml_model_format = Some(model_format);
+        self
+    }
+
+    pub fn with_coreml_static_input_shapes(mut self, enable: bool) -> Self {
+        self.coreml_static_input_shapes = enable;
+        self
+    }
+
+    pub fn with_coreml_enable_subgraphs(mut self, enable: bool) -> Self {
+        self.coreml_enable_subgraphs = enable;
+        self
+    }
+
+    pub fn with_coreml_specialization_strategy(
+        mut self,
+        strategy: ort::ep::coreml::SpecializationStrategy,
+    ) -> Self {
+        self.coreml_specialization_strategy = Some(strategy);
+        self
+    }
+
+    pub fn with_session_config(mut self, session: SessionConfig) -> Self {
+        self.session = session;
         self
     }
 }
@@ -220,7 +275,10 @@ impl Canary {
             },
             _ => config.clone(),
         };
-        let decoder = Arc::new(Mutex::new(Self::create_session(&decoder_path, &decoder_config)?));
+        let decoder = Arc::new(Mutex::new(Self::create_session(
+            &decoder_path,
+            &decoder_config,
+        )?));
 
         Ok(Self {
             encoder,
@@ -244,12 +302,7 @@ impl Canary {
         target_lang: impl Into<String>,
         config: StreamConfig,
     ) -> Result<CanaryStream> {
-        CanaryStream::new(
-            self.clone(),
-            source_lang.into(),
-            target_lang.into(),
-            config,
-        )
+        CanaryStream::new(self.clone(), source_lang.into(), target_lang.into(), config)
     }
 
     /// Transcribe an audio file using a fresh session.

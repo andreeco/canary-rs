@@ -28,7 +28,15 @@ fn execution_providers(config: &ExecutionConfig) -> Result<Vec<ExecutionProvider
             providers.push(cpu_provider());
         }
         ExecutionProvider::CoreML => {
-            providers.push(coreml_provider(config.coreml_cache_dir.as_deref())?);
+            providers.push(coreml_provider(
+                config.coreml_cache_dir.as_deref(),
+                config.coreml_compute_units,
+                config.coreml_low_precision,
+                config.coreml_model_format,
+                config.coreml_static_input_shapes,
+                config.coreml_enable_subgraphs,
+                config.coreml_specialization_strategy,
+            )?);
             providers.push(cpu_provider());
         }
         ExecutionProvider::DirectML => {
@@ -86,11 +94,34 @@ fn tensorrt_provider() -> Result<ExecutionProviderDispatch> {
     }
 }
 
-fn coreml_provider(cache_dir: Option<&str>) -> Result<ExecutionProviderDispatch> {
+fn coreml_provider(
+    cache_dir: Option<&str>,
+    compute_units: Option<ort::ep::coreml::ComputeUnits>,
+    low_precision: bool,
+    model_format: Option<ort::ep::coreml::ModelFormat>,
+    static_input_shapes: bool,
+    enable_subgraphs: bool,
+    specialization_strategy: Option<ort::ep::coreml::SpecializationStrategy>,
+) -> Result<ExecutionProviderDispatch> {
     #[cfg(feature = "coreml")]
     {
-        let mut provider =
-            ort::ep::CoreML::default().with_compute_units(ort::ep::coreml::ComputeUnits::CPUAndGPU);
+        let mut provider = ort::ep::CoreML::default()
+            .with_compute_units(
+                compute_units.unwrap_or(ort::ep::coreml::ComputeUnits::CPUAndNeuralEngine),
+            )
+            .with_low_precision_accumulation_on_gpu(low_precision);
+        if let Some(model_format) = model_format {
+            provider = provider.with_model_format(model_format);
+        }
+        if static_input_shapes {
+            provider = provider.with_static_input_shapes(true);
+        }
+        if enable_subgraphs {
+            provider = provider.with_subgraphs(true);
+        }
+        if let Some(strategy) = specialization_strategy {
+            provider = provider.with_specialization_strategy(strategy);
+        }
         if let Some(cache_dir) = cache_dir {
             if !cache_dir.trim().is_empty() {
                 provider = provider.with_model_cache_dir(cache_dir.to_string());
@@ -101,6 +132,12 @@ fn coreml_provider(cache_dir: Option<&str>) -> Result<ExecutionProviderDispatch>
     #[cfg(not(feature = "coreml"))]
     {
         let _ = cache_dir;
+        let _ = compute_units;
+        let _ = low_precision;
+        let _ = model_format;
+        let _ = static_input_shapes;
+        let _ = enable_subgraphs;
+        let _ = specialization_strategy;
         Err(CanaryError::ModelError(
             "CoreML execution provider not enabled; build with feature \"coreml\"".into(),
         ))
