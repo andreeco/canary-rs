@@ -45,7 +45,7 @@ fn test_transcribe_loading_audio() -> Result<()> {
 fn test_session_config_defaults() {
     let cfg = SessionConfig::default();
     assert!(cfg.use_pnc);
-    assert!(!cfg.use_itn);
+    assert_eq!(cfg.use_itn, None);
     assert!(!cfg.use_timestamps);
     assert!(!cfg.use_diarize);
     assert_eq!(cfg.max_length, 512);
@@ -71,6 +71,7 @@ fn test_session_config_builders() {
         .with_suppress_tokens(vec![1, 2, 3])
         .with_suppress_tokens_below(-5.0)
         .with_emotion_token("<|emo:neutral|>")
+        .with_itn(false)
         .with_sampling(true)
         .with_temperature(0.8)
         .with_top_k(40)
@@ -83,6 +84,7 @@ fn test_session_config_builders() {
     assert_eq!(cfg.suppress_tokens_below, -5.0);
     assert_eq!(cfg.suppress_token_ids, Some(vec![1, 2, 3]));
     assert_eq!(cfg.emotion_token.as_deref(), Some("<|emo:neutral|>"));
+    assert_eq!(cfg.use_itn, Some(false));
     assert!(cfg.sample);
     assert_eq!(cfg.temperature, 0.8);
     assert_eq!(cfg.top_k, 40);
