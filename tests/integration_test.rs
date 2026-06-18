@@ -56,6 +56,7 @@ fn test_session_config_defaults() {
     assert!(cfg.suppress_token_ids.is_none());
     assert!(cfg.emotion_token.is_none());
     assert!(!cfg.sample);
+    assert_eq!(cfg.chunk_seconds, None);
     assert_eq!(cfg.temperature, 1.0);
     assert_eq!(cfg.top_k, 0);
     assert_eq!(cfg.top_p, 1.0);

@@ -62,6 +62,8 @@ pub struct SessionConfig {
     pub decoder_context: Option<String>,
     /// Enable sampling instead of greedy/beam.
     pub sample: bool,
+    /// Optional chunk duration (seconds) for long-audio decode. If set, decoding runs per chunk and concatenates text.
+    pub chunk_seconds: Option<usize>,
     /// Sampling temperature (1.0 = no scaling).
     pub temperature: f32,
     /// Top-k sampling (0 disables).
@@ -91,6 +93,7 @@ impl Default for SessionConfig {
             emotion_token: None,
             decoder_context: None,
             sample: false,
+            chunk_seconds: None,
             temperature: 1.0,
             top_k: 0,
             top_p: 1.0,
@@ -157,6 +160,11 @@ impl SessionConfig {
 
     pub fn with_sampling(mut self, enabled: bool) -> Self {
         self.sample = enabled;
+        self
+    }
+
+    pub fn with_chunk_seconds(mut self, seconds: usize) -> Self {
+        self.chunk_seconds = Some(seconds.max(1));
         self
     }
 

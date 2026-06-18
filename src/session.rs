@@ -95,6 +95,45 @@ impl CanarySession {
             mono_audio
         };
 
+        if let Some(chunk_secs) = self.model.config.session.chunk_seconds.filter(|v| *v > 0) {
+            let chunk_len = self.model.sample_rate.saturating_mul(chunk_secs);
+            if chunk_len > 0 && resampled_audio.len() > chunk_len {
+                let mut merged_text = String::new();
+                let mut merged_tokens = Vec::new();
+                let mut offset_secs = 0.0_f32;
+
+                for chunk in resampled_audio.chunks(chunk_len) {
+                    self.reset();
+
+                    let features = audio::extract_features(chunk, self.model.sample_rate)?;
+                    let encoded = self.run_encoder(&features)?;
+                    let token_results = self.run_decoder(&encoded, source_lang, target_lang, None)?;
+                    let mut result = self.decode_tokens(&token_results)?;
+
+                    let chunk_text = result.text.trim();
+                    if !chunk_text.is_empty() {
+                        if !merged_text.is_empty() {
+                            merged_text.push(' ');
+                        }
+                        merged_text.push_str(chunk_text);
+                    }
+
+                    for tok in result.tokens.iter_mut() {
+                        tok.start += offset_secs;
+                        tok.end += offset_secs;
+                    }
+                    merged_tokens.extend(result.tokens.into_iter());
+
+                    offset_secs += chunk.len() as f32 / self.model.sample_rate as f32;
+                }
+
+                return Ok(CanaryResult {
+                    text: merged_text,
+                    tokens: merged_tokens,
+                });
+            }
+        }
+
         // Extract features
         let features = audio::extract_features(&resampled_audio, self.model.sample_rate)?;
 
