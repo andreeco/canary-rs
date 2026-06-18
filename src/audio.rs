@@ -67,11 +67,11 @@ pub fn to_mono(audio: &[f32], channels: usize) -> Vec<f32> {
 }
 
 pub fn resample(audio: &[f32], from_rate: usize, to_rate: usize) -> Result<Vec<f32>> {
+    use audioadapter_buffers::direct::SequentialSliceOfVecs;
     use rubato::{
         Async, FixedAsync, Resampler, SincInterpolationParameters, SincInterpolationType,
         WindowFunction,
     };
-    use audioadapter_buffers::direct::SequentialSliceOfVecs;
 
     if audio.is_empty() {
         return Ok(Vec::new());
@@ -114,7 +114,7 @@ pub fn resample(audio: &[f32], from_rate: usize, to_rate: usize) -> Result<Vec<f
 }
 
 pub fn extract_features(audio: &[f32], sample_rate: usize) -> Result<Array3<f32>> {
-    use rustfft::{num_complex::Complex, num_traits::Zero, FftPlanner};
+    use rustfft::{FftPlanner, num_complex::Complex, num_traits::Zero};
     use std::f32::consts::PI;
 
     let sample_rate = sample_rate as f32;

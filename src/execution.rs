@@ -8,9 +8,7 @@ pub fn apply_execution_providers(
     config: &ExecutionConfig,
 ) -> Result<SessionBuilder> {
     let providers = execution_providers(config)?;
-    builder = builder
-        .with_execution_providers(providers)
-        .map_err(|e| CanaryError::OrtError(e.into()))?;
+    builder = builder.with_execution_providers(providers)?;
     Ok(builder)
 }
 
@@ -87,7 +85,9 @@ fn cuda_provider(device_id: i32) -> Result<ExecutionProviderDispatch> {
 fn tensorrt_provider(device_id: i32) -> Result<ExecutionProviderDispatch> {
     #[cfg(feature = "tensorrt")]
     {
-        Ok(ort::ep::TensorRT::default().with_device_id(device_id).build())
+        Ok(ort::ep::TensorRT::default()
+            .with_device_id(device_id)
+            .build())
     }
     #[cfg(not(feature = "tensorrt"))]
     {

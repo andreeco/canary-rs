@@ -7,8 +7,7 @@ mod types;
 
 pub use model::{Canary, ExecutionConfig, ExecutionProvider, SessionConfig};
 pub use ort::ep::coreml::{
-    ComputeUnits as CoreMLComputeUnits,
-    ModelFormat as CoreMLModelFormat,
+    ComputeUnits as CoreMLComputeUnits, ModelFormat as CoreMLModelFormat,
     SpecializationStrategy as CoreMLSpecializationStrategy,
 };
 pub use session::CanarySession;
